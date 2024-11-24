@@ -7,10 +7,9 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use qr2term::print_qr;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
-use image::load_from_memory;
 use chrono::{TimeZone, Local};
 
-const API_BASE_URL: &str = "BASE_API_URL";
+const API_BASE_URL: &str = "https://netease-delta-ten.vercel.app";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct LoginResponse {
@@ -485,11 +484,13 @@ impl NeteaseMusicClient {
         use futures::stream::{self, StreamExt};
         use tokio::time::{sleep, Duration};
 
-        // 创建 comments 目录
+        // 创建 comments 目录用于保存评论文件
         fs::create_dir_all("comments")?;
 
+        // 设置并发数为 50
         let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(50));
 
+        // 创建进度条
         let m = MultiProgress::new();
         let total_progress = std::sync::Arc::new(m.add(ProgressBar::new(songs.len() as u64)));
         total_progress.set_style(
@@ -499,6 +500,7 @@ impl NeteaseMusicClient {
                 .progress_chars("##-")
         );
 
+        // 创建歌曲处理流
         let song_stream = stream::iter(songs.iter().enumerate()).map({
             let total_progress = total_progress.clone();
             move |(song_index, song)| {
@@ -520,6 +522,7 @@ impl NeteaseMusicClient {
                     let _permit = semaphore.acquire().await.unwrap();
                     let mut song_comments = Vec::new();
                     
+                    // 每页获取 100 条评论，最多获取 100 页
                     for offset in (0..10000).step_by(100) {
                         sleep(Duration::from_millis(50)).await;
                         
@@ -589,10 +592,12 @@ impl NeteaseMusicClient {
                                 
                                 song_comments.extend(user_comments);
 
+                                // 每 5 页更新一次进度条
                                 if offset % 500 == 0 {
                                     song_progress.inc(5);
                                 }
 
+                                // 如果返回的评论数小于请求数，说明已到达末尾
                                 if comments.len() < 100 {
                                     break;
                                 }
@@ -604,7 +609,7 @@ impl NeteaseMusicClient {
                         }
                     }
 
-                    // 保存当前歌曲的��论到单独的文件
+                    // 保存当前歌曲的评论到单独的文件
                     if !song_comments.is_empty() {
                         if let Ok(json_str) = serde_json::to_string_pretty(&song_comments) {
                             let file_path = format!("comments/song_{}.json", song.song.id);
@@ -622,11 +627,12 @@ impl NeteaseMusicClient {
             }
         });
 
+        // 并发处理所有歌曲，最多 50 个并发
         let mut buffered = song_stream.buffer_unordered(50);
         
         while let Some(result) = buffered.next().await {
-            if let Ok(comments) = result {
-                // 处理评论...
+            if let Ok(_comments) = result {
+                // 评论已经保存到文件，这里不需要额外处理
             }
         }
 
